@@ -2,6 +2,9 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart' as qrfl;
 import 'widgets/qr_image.dart';
+import 'utils/download_qr.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 // NOTE: Add firebase packages later and initialize Firebase in main()
 // e.g. firebase_core, firebase_auth, cloud_firestore, firebase_storage
 
@@ -480,23 +483,111 @@ class QRAccessTab extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             // Use compatibility widget (now named QrImage) so the code can use `data:` style call.
-            QrImage(
-              data: qrData,
-              version: qrfl.QrVersions.auto,
-              size: 200.0,
-              backgroundColor: Colors.white,
-              gapless: true,
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.black26),
+                borderRadius: BorderRadius.circular(12),
+                color: Colors.white,
+              ),
+              child: QrImage(
+                data: qrData,
+                version: qrfl.QrVersions.auto,
+                size: 200.0,
+                backgroundColor: Colors.white,
+                gapless: true,
+                moduleColor: Colors.black, // force test color to ensure visibility
+                eyeColor: Colors.black,
+                margin: 4.0,
+              ),
             ),
             const SizedBox(height: 16),
             const Text('Share this QR with your doctor to grant access.'),
             const SizedBox(height: 8),
-            ElevatedButton.icon(
-              onPressed: () {
-                // TODO: allow generation of temporary access codes & revoke
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generate Access Code')));
-              },
-              icon: const Icon(Icons.key),
-              label: const Text('Generate Access Code'),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    // Generate QR bytes and trigger download / save
+                    const double imgSize = 1000; // higher resolution for download
+                    final painter = qrfl.QrPainter(
+                      data: qrData,
+                      version: qrfl.QrVersions.auto,
+                      gapless: false,
+                      dataModuleStyle: qrfl.QrDataModuleStyle(color: Colors.black),
+                      eyeStyle: qrfl.QrEyeStyle(eyeShape: qrfl.QrEyeShape.square, color: Colors.black),
+                    );
+                    final messenger = ScaffoldMessenger.of(context);
+                    messenger.showSnackBar(const SnackBar(content: Text('Preparing QR...')));
+                    try {
+                      final bd = await painter.toImageData(imgSize);
+                      if (bd != null) {
+                        final bytes = bd.buffer.asUint8List();
+                        final result = await downloadQr(bytes, 'medi_qr_$qrData.png');
+                            messenger.showSnackBar(SnackBar(content: Text(result ?? 'Downloaded')));
+                      } else {
+                        messenger.showSnackBar(const SnackBar(content: Text('Failed to generate QR image')));
+                      }
+                    } catch (e) {
+                      messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
+                    }
+                  },
+                  icon: const Icon(Icons.download),
+                  label: const Text('Download QR'),
+                ),
+                    const SizedBox(width: 12),
+                    ElevatedButton.icon(
+                      onPressed: () async {
+                        // Share the QR image. On web, fallback to download (web share of files is limited).
+                        const double imgSize = 1000;
+                        final painter = qrfl.QrPainter(
+                          data: qrData,
+                          version: qrfl.QrVersions.auto,
+                          gapless: false,
+                          dataModuleStyle: qrfl.QrDataModuleStyle(color: Colors.black),
+                          eyeStyle: qrfl.QrEyeStyle(eyeShape: qrfl.QrEyeShape.square, color: Colors.black),
+                        );
+                        final messenger = ScaffoldMessenger.of(context);
+                        messenger.showSnackBar(const SnackBar(content: Text('Preparing to share...')));
+                        try {
+                          final bd = await painter.toImageData(imgSize);
+                          if (bd == null) {
+                            messenger.showSnackBar(const SnackBar(content: Text('Failed to generate QR image')));
+                            return;
+                          }
+                          final bytes = bd.buffer.asUint8List();
+                          if (kIsWeb) {
+                            // Web: trigger download as a fallback for sharing files
+                            await downloadQr(bytes, 'medi_qr_$qrData.png');
+                            messenger.showSnackBar(const SnackBar(content: Text('Downloaded (use your browser share to send)')));
+                            return;
+                          }
+                          // Non-web: save to temp and share via platform share sheet
+                          final path = await downloadQr(bytes, 'medi_qr_$qrData.png');
+                          if (path != null) {
+                            await Share.shareXFiles([XFile(path)], text: 'MediTrack QR for $qrData');
+                            messenger.showSnackBar(const SnackBar(content: Text('Shared')));
+                          } else {
+                            messenger.showSnackBar(const SnackBar(content: Text('Failed to save file for sharing')));
+                          }
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        }
+                      },
+                      icon: const Icon(Icons.share),
+                      label: const Text('Share'),
+                    ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    // TODO: allow generation of temporary access codes & revoke
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generate Access Code')));
+                  },
+                  icon: const Icon(Icons.key),
+                  label: const Text('Generate Access Code'),
+                ),
+              ],
             ),
           ],
         ),

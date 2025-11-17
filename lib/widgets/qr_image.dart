@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
 import 'package:qr_flutter/qr_flutter.dart';
 
 /// A small compatibility widget that exposes the older `QrImage(data: ...)`
@@ -21,36 +22,52 @@ class QrImage extends StatelessWidget {
     super.key,
     required this.data,
     this.version,
-    this.size = 200.0,
+    this.size = 260.0,
     this.backgroundColor,
-    this.gapless = true,
-    this.moduleColor = const Color(0xFF2B7FFF), // MediTrack blue
-    this.eyeColor = const Color(0xFF2B7FFF), // MediTrack blue
-    this.margin = 0.0,
+    this.gapless = false,
+    this.moduleColor = Colors.black,
+    this.eyeColor = Colors.black,
+    this.margin = 16.0,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Use QrPainter to generate PNG bytes and display with Image.memory.
+    // This approach is more reliable across web and desktop where direct
+    // CustomPaint painting may not render as expected in some environments.
+    final painter = QrPainter(
+      data: data,
+      version: version ?? QrVersions.auto,
+      gapless: gapless,
+      dataModuleStyle: QrDataModuleStyle(color: moduleColor),
+      eyeStyle: QrEyeStyle(eyeShape: QrEyeShape.square, color: eyeColor),
+    );
+
     return Padding(
       padding: EdgeInsets.all(margin),
       child: SizedBox(
         width: size,
         height: size,
-        child: CustomPaint(
-          painter: QrPainter(
-            data: data,
-            version: version ?? QrVersions.auto,
-            gapless: gapless,
-            // Modern styling: rounded eyes with MediTrack blue color scheme
-            dataModuleStyle: QrDataModuleStyle(
-              color: moduleColor,
-            ),
-            eyeStyle: QrEyeStyle(
-              eyeShape: QrEyeShape.circle, // Rounded corners
-              color: eyeColor,
-            ),
-          ),
-          child: Container(color: backgroundColor ?? Colors.white),
+        child: FutureBuilder<ByteData?>(
+          future: painter.toImageData(size),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.done && snapshot.hasData) {
+              final bytes = snapshot.data!.buffer.asUint8List();
+              return Container(
+                color: backgroundColor ?? Colors.white,
+                child: Image.memory(bytes, width: size, height: size, fit: BoxFit.contain),
+              );
+            }
+
+            // While building, show a placeholder box so layout is stable.
+            return Container(
+              width: size,
+              height: size,
+              color: backgroundColor ?? Colors.white,
+              alignment: Alignment.center,
+              child: const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+            );
+          },
         ),
       ),
     );
